@@ -1,22 +1,24 @@
-use crate::exercise::{Exercise, ExerciseList};
-use crate::project::RustAnalyzerProject;
-use crate::run::{reset, run};
-use crate::verify::verify;
-use argh::FromArgs;
-use console::Emoji;
-use notify::DebouncedEvent;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, prelude::*};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use argh::FromArgs;
+use console::Emoji;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::DebouncedEvent;
+use serde::{Deserialize, Serialize};
+
+use crate::exercise::{Exercise, ExerciseList};
+use crate::project::RustAnalyzerProject;
+use crate::run::{reset, run};
+use crate::verify::verify;
 
 #[macro_use]
 mod ui;
@@ -127,17 +129,17 @@ struct ListArgs {
 pub struct ExerciseCheckList {
     pub exercises: Vec<ExerciseResult>,
     pub user_name: Option<String>,
-    pub statistics: ExerciseStatistics
+    pub statistics: ExerciseStatistics,
 }
 
 #[derive(Deserialize, Serialize)]
 pub struct ExerciseResult {
     pub name: String,
-    pub result: bool
+    pub result: bool,
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct  ExerciseStatistics {
+pub struct ExerciseStatistics {
     pub total_exercations: usize,
     pub total_succeeds: usize,
     pub total_failures: usize,
@@ -264,21 +266,22 @@ async fn main() {
         Subcommands::MyVerify(_subargs) => {
             let toml_str = &fs::read_to_string("check.toml").unwrap();
             exercises = toml::from_str::<ExerciseList>(toml_str).unwrap().exercises;
-            let now_start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+            let now_start = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
             let rights = Arc::new(Mutex::new(0));
             let alls = exercises.len();
 
-            let exercise_check_list =  Arc::new(Mutex::new(
-                ExerciseCheckList {
-                    exercises: vec![], 
-                    user_name:  None, 
-                    statistics: ExerciseStatistics { 
-                        total_exercations: alls, 
-                        total_succeeds: 0, 
-                        total_failures: 0,  
-                    }
-                }
-            ));
+            let exercise_check_list = Arc::new(Mutex::new(ExerciseCheckList {
+                exercises: vec![],
+                user_name: None,
+                statistics: ExerciseStatistics {
+                    total_exercations: alls,
+                    total_succeeds: 0,
+                    total_failures: 0,
+                },
+            }));
 
             let mut tasks = vec![];
             for exercise in exercises {
@@ -286,39 +289,62 @@ async fn main() {
                 let c_mutex = Arc::clone(&rights);
                 let exercise_check_list_ref = Arc::clone(&exercise_check_list);
                 let _verbose = verbose.clone();
-                let t = tokio::task::spawn( async move {
+                let t = tokio::task::spawn(async move {
                     match run(&inner_exercise, true) {
                         Ok(_) => {
                             *c_mutex.lock().unwrap() += 1;
                             println!("{}执行成功", inner_exercise.name);
                             println!("总的题目数: {}", alls);
                             println!("当前做正确的题目数: {}", *c_mutex.lock().unwrap());
-                            let now_end = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                            let now_end = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs();
                             println!("当前修改试卷总耗时: {} s", now_end - now_start);
-                            exercise_check_list_ref.lock().unwrap().exercises.push(ExerciseResult{ 
-                                name: inner_exercise.name, result: true,
-                            });
-                            exercise_check_list_ref.lock().unwrap().statistics.total_succeeds += 1;
-                        },
+                            exercise_check_list_ref.lock().unwrap().exercises.push(
+                                ExerciseResult {
+                                    name: inner_exercise.name,
+                                    result: true,
+                                },
+                            );
+                            exercise_check_list_ref
+                                .lock()
+                                .unwrap()
+                                .statistics
+                                .total_succeeds += 1;
+                        }
                         Err(_) => {
                             println!("{}执行失败", inner_exercise.name);
                             println!("总的题目数: {}", alls);
                             println!("当前做正确的题目数: {}", *c_mutex.lock().unwrap());
-                            let now_end = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                            let now_end = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs();
                             println!("当前修改试卷耗时: {} s", now_end - now_start);
-                            exercise_check_list_ref.lock().unwrap().exercises.push(ExerciseResult{ 
-                                name: inner_exercise.name, result: false,
-                            });
-                            exercise_check_list_ref.lock().unwrap().statistics.total_failures += 1;
+                            exercise_check_list_ref.lock().unwrap().exercises.push(
+                                ExerciseResult {
+                                    name: inner_exercise.name,
+                                    result: false,
+                                },
+                            );
+                            exercise_check_list_ref
+                                .lock()
+                                .unwrap()
+                                .statistics
+                                .total_failures += 1;
                         }
                     }
                 });
                 tasks.push(t);
             }
-            for task in tasks { task.await.unwrap(); }
-            let serialized = serde_json::to_string_pretty(&*exercise_check_list.lock().unwrap()).unwrap();
+            for task in tasks {
+                task.await.unwrap();
+            }
+            let serialized =
+                serde_json::to_string_pretty(&*exercise_check_list.lock().unwrap()).unwrap();
             fs::write(".github/result/check_result.json", serialized).unwrap();
-        },
+        }
 
         Subcommands::Lsp(_subargs) => {
             let mut project = RustAnalyzerProject::new();

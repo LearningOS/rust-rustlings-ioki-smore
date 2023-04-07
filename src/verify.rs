@@ -1,7 +1,9 @@
-use crate::exercise::{CompiledExercise, Exercise, Mode, State};
+use std::env;
+
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
-use std::env;
+
+use crate::exercise::{CompiledExercise, Exercise, Mode, State};
 
 // Verify that the provided container of Exercise objects
 // can be compiled and run without any failures.
@@ -9,15 +11,16 @@ use std::env;
 // If the Exercise being verified is a test, the verbose boolean
 // determines whether or not the test harness outputs are displayed.
 pub fn verify<'a>(
-    exercises: impl IntoIterator<Item = &'a Exercise>,
+    exercises: impl IntoIterator<Item=&'a Exercise>,
     progress: (usize, usize),
     verbose: bool,
 ) -> Result<(), &'a Exercise> {
     let (num_done, total) = progress;
     let bar = ProgressBar::new(total as u64);
-    bar.set_style(ProgressStyle::default_bar()
-        .template("Progress: [{bar:60.green/red}] {pos}/{len} {msg}")
-        .progress_chars("#>-")
+    bar.set_style(
+        ProgressStyle::default_bar()
+            .template("Progress: [{bar:60.green/red}] {pos}/{len} {msg}")
+            .progress_chars("#>-"),
     );
     bar.set_position(num_done as u64);
     for exercise in exercises {
